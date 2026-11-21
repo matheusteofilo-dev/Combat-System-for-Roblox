@@ -58,7 +58,7 @@ function ShieldIndicator:_clone(model: Model)
 		end
 	end
 	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
-	return { gui = gui, fill = clonedFill, paints = paints, scale = holder:FindFirstChildOfClass("UIScale"), root = adornee, baseWidth = math.max(holder.Size.X.Offset, 1) }
+	return { gui = gui, fill = clonedFill, paints = paints, scale = holder:FindFirstChildOfClass("UIScale"), root = adornee, baseWidth = math.max(holder.Size.X.Offset, 1), baseHeight = math.max(holder.Size.Y.Offset, 1) }
 end
 
 function ShieldIndicator:_scaleFor(entry, camera: Camera): number
@@ -67,14 +67,21 @@ function ShieldIndicator:_scaleFor(entry, camera: Camera): number
 	return math.clamp(self.widthStuds * pixelsPerStud / entry.baseWidth, MIN_SCALE, MAX_SCALE)
 end
 
+local function applyScale(entry, value: number)
+	if entry.scale then
+		entry.scale.Scale = value
+	end
+	entry.gui.Size = UDim2.fromOffset(math.ceil(entry.baseWidth * value) + 4, math.ceil(entry.baseHeight * value) + 4)
+end
+
 function ShieldIndicator:_rescale()
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		return
 	end
 	for _, entry in pairs(self.active) do
-		if entry.scale and entry.root.Parent then
-			entry.scale.Scale = self:_scaleFor(entry, camera)
+		if entry.root.Parent then
+			applyScale(entry, self:_scaleFor(entry, camera))
 		end
 	end
 end
@@ -156,8 +163,8 @@ function ShieldIndicator:shatter(model)
 	end
 	entry.fill.Size = UDim2.fromScale(1, 1)
 	local camera = Workspace.CurrentCamera
-	if entry.scale and camera then
-		entry.scale.Scale = self:_scaleFor(entry, camera)
+	if camera then
+		applyScale(entry, self:_scaleFor(entry, camera))
 	end
 	for _, paint in ipairs(entry.paints) do
 		paint.BackgroundColor3 = LOW
@@ -168,7 +175,7 @@ function ShieldIndicator:shatter(model)
 			TweenService:Create(d, info, { BackgroundTransparency = 1 }):Play()
 		end
 	end
-	TweenService:Create(entry.gui.Holder.Slot, info, { Rotation = (if math.random() < 0.5 then -1 else 1) * 25 }):Play()
+	TweenService:Create(entry.gui.Holder, info, { Position = UDim2.new(0.5, 0, 0.5, 8) }):Play()
 	Debris:AddItem(entry.gui, 0.5)
 end
 

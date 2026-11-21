@@ -30,11 +30,8 @@ local CLIMB_CYCLE_RATE = 1.4
 local CLIMB_BLEND = 0.12
 local GUARD_BLEND = 0.08
 local GUARD_POSE = {
-	rightArm = { 150, 0, 28 },
+	rightArm = { 128, 0, -34 },
 	leftArm = { 88, 0, 62 },
-	torso = { 0, 0, 0 },
-	rightLeg = { -12, 0, 0 },
-	leftLeg = { 16, 0, 0 },
 }
 
 local ProceduralAnimator = {}
