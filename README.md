@@ -82,6 +82,8 @@ The system never creates its objects in code. If one of them is missing it print
 
 While climbing, a procedural animation holds the hands and feet against the wall and alternates them as you move up, down or sideways (every client plays it for every climbing player; it stops moving when you stop).
 
+Moving sideways around a corner keeps the climb going: at an outside corner the character swings around to the next face, and at an inside corner it turns to the wall it runs into, with a short turn of about 0.2 s. Changing direction quickly at a corner does not drop you while stamina is left. The server checks the new face with its own raycast.
+
 Leaving a wall counts as the first jump, so the next `Space` is the double jump. If the climb stamina runs out more than `climb.ragdollFallHeight` studs above the ground you ragdoll until you land. A double or sky jump during that fall gets you out of the ragdoll.
 
 ## Configuration

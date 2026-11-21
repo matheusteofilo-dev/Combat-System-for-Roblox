@@ -13,6 +13,12 @@ local STICK_GAIN = 8
 local MANTLE_UP = 35
 local MANTLE_FORWARD = 12
 local AIR_JUMP_DEBOUNCE = 0.1
+local CORNER_DOT = 0.7
+local CORNER_PROBE = 0.4
+local TURN_TIME = 0.22
+local TURN_OUT = 0.5
+local TURN_COOLDOWN = 0.05
+local MISS_GRACE = 0.2
 
 local flat = CombatShared.flat
 
@@ -322,37 +328,134 @@ function MovementController:_climbJump()
 	self.root.AssemblyLinearVelocity = away * ctx.resolve(cfg.jumpAwaySpeed) + Vector3.yAxis * ctx.resolve(cfg.jumpPower)
 end
 
+function MovementController:_cornerHit(climb, side: number, onWall: boolean)
+	local root = self.root
+	local normal = flat(climb.normal)
+	if normal.Magnitude < 1e-3 then
+		return nil, false
+	end
+	normal = normal.Unit
+	local facing = -normal
+	local right = facing:Cross(Vector3.yAxis) * side
+	local function valid(hit)
+		return hit ~= nil and math.abs(hit.Normal.Y) <= 0.5 and flat(hit.Normal).Unit:Dot(normal) < CORNER_DOT
+	end
+	if onWall then
+		local inner = Workspace:Raycast(root.Position, right * (root.Size.X / 2 + WALL_GAP + CORNER_PROBE), self.params)
+		return if valid(inner) then inner else nil, false
+	end
+	local origin = root.Position + facing * (root.Size.Z / 2 + WALL_GAP + CORNER_PROBE)
+	local outer = Workspace:Raycast(origin, -right * (self.ctx.config.climb.reach + 1), self.params)
+	return if valid(outer) then outer else nil, true
+end
+
+local function easeTurn(a: number): number
+	return 1 - (1 - a) * (1 - a)
+end
+
+function MovementController:_beginTurn(climb, hit, outer: boolean)
+	local root = self.root
+	local normal = flat(hit.Normal).Unit
+	local desired = root.Size.Z / 2 + WALL_GAP
+	local position
+	if outer then
+		position = Vector3.new(hit.Position.X, root.Position.Y, hit.Position.Z) + normal * desired
+	else
+		position = root.Position - normal * ((root.Position - hit.Position):Dot(normal) - desired)
+	end
+	climb.turn = {
+		from = root.CFrame,
+		to = CFrame.lookAt(position, position - normal),
+		start = os.clock(),
+	}
+	climb.normal = hit.Normal
+	climb.missSince = nil
+end
+
+function MovementController:_stepTurn(climb): boolean
+	local turn = climb.turn
+	local alpha = math.clamp((os.clock() - turn.start) / TURN_TIME, 0, 1)
+	local eased = easeTurn(alpha)
+	local frame = turn.from:Lerp(turn.to, eased)
+	local lift = math.sin(alpha * math.pi) * TURN_OUT
+	local out = flat(turn.from.LookVector + turn.to.LookVector)
+	if lift > 0 and out.Magnitude > 1e-3 then
+		frame = frame - out.Unit * lift
+	end
+	climb.velocity.VectorVelocity = Vector3.zero
+	climb.orientation.CFrame = frame.Rotation
+	self.root.CFrame = frame
+	self.root.AssemblyLinearVelocity = Vector3.zero
+	if alpha >= 1 then
+		climb.turn = nil
+		return false
+	end
+	return true
+end
+
 function MovementController:_stepClimb()
 	local climb = self.climbing
 	local ctx = self.ctx
 	local cfg = ctx.config.climb
 	local root = self.root
-	local hit = self:_wallHit(-climb.normal)
-	if hit then
-		climb.normal = hit.Normal
-		local facing = -flat(hit.Normal).Unit
-		local right = facing:Cross(Vector3.yAxis)
-		local distance = (root.Position - hit.Position):Dot(hit.Normal)
-		local desired = root.Size.Z / 2 + WALL_GAP
-		local up = (if UserInputService:IsKeyDown(Enum.KeyCode.W) then 1 else 0) - (if UserInputService:IsKeyDown(Enum.KeyCode.S) then 1 else 0)
-		local side = (if UserInputService:IsKeyDown(Enum.KeyCode.D) then 1 else 0) - (if UserInputService:IsKeyDown(Enum.KeyCode.A) then 1 else 0)
-		local move = Vector3.yAxis * up + right * side
-		if move.Magnitude > 1 then
-			move = move.Unit
-		end
-		climb.velocity.VectorVelocity = move * ctx.resolve(cfg.speed) - hit.Normal * (distance - desired) * STICK_GAIN
-		climb.orientation.CFrame = CFrame.lookAt(Vector3.zero, facing)
-	else
-		local facing = -flat(climb.normal).Unit
-		local feet = self:_wallHit(-climb.normal, root.Position - Vector3.new(0, 2.5, 0))
-		ctx.send("Climb", false)
-		self:_endClimb(if feet then "mantle" else "wall")
-		if feet then
-			root.AssemblyLinearVelocity = Vector3.yAxis * MANTLE_UP + facing * MANTLE_FORWARD
-		end
+	self.indicator:update((climb.endsAt - ctx.now()) / climb.duration)
+	if climb.turn and self:_stepTurn(climb) then
 		return
 	end
-	self.indicator:update((climb.endsAt - ctx.now()) / climb.duration)
+	local up = (if UserInputService:IsKeyDown(Enum.KeyCode.W) then 1 else 0) - (if UserInputService:IsKeyDown(Enum.KeyCode.S) then 1 else 0)
+	local side = (if UserInputService:IsKeyDown(Enum.KeyCode.D) then 1 else 0) - (if UserInputService:IsKeyDown(Enum.KeyCode.A) then 1 else 0)
+	if side ~= 0 then
+		climb.lastSide = side
+	end
+	local hit = self:_wallHit(-climb.normal)
+	if hit and side ~= 0 and os.clock() >= (climb.turnReadyAt or 0) then
+		local inner = self:_cornerHit(climb, side, true)
+		if inner then
+			self:_beginTurn(climb, inner, false)
+			climb.turnReadyAt = os.clock() + TURN_TIME + TURN_COOLDOWN
+			return
+		end
+	end
+	if not hit then
+		local feet = self:_wallHit(-climb.normal, root.Position - Vector3.new(0, 2.5, 0))
+		if feet then
+			local facing = -flat(climb.normal).Unit
+			ctx.send("Climb", false)
+			self:_endClimb("mantle")
+			root.AssemblyLinearVelocity = Vector3.yAxis * MANTLE_UP + facing * MANTLE_FORWARD
+			return
+		end
+		local first = if side ~= 0 then side else (climb.lastSide or 1)
+		for _, probe in ipairs({ first, -first }) do
+			local outer = self:_cornerHit(climb, probe, false)
+			if outer then
+				self:_beginTurn(climb, outer, true)
+				climb.turnReadyAt = os.clock() + TURN_TIME + TURN_COOLDOWN
+				return
+			end
+		end
+		local now = os.clock()
+		climb.missSince = climb.missSince or now
+		if now - climb.missSince < MISS_GRACE then
+			climb.velocity.VectorVelocity = Vector3.yAxis * up * ctx.resolve(cfg.speed) * 0.5
+			return
+		end
+		ctx.send("Climb", false)
+		self:_endClimb("wall")
+		return
+	end
+	climb.missSince = nil
+	climb.normal = hit.Normal
+	local facing = -flat(hit.Normal).Unit
+	local right = facing:Cross(Vector3.yAxis)
+	local distance = (root.Position - hit.Position):Dot(hit.Normal)
+	local desired = root.Size.Z / 2 + WALL_GAP
+	local move = Vector3.yAxis * up + right * side
+	if move.Magnitude > 1 then
+		move = move.Unit
+	end
+	climb.velocity.VectorVelocity = move * ctx.resolve(cfg.speed) - hit.Normal * (distance - desired) * STICK_GAIN
+	climb.orientation.CFrame = CFrame.lookAt(Vector3.zero, facing)
 end
 
 function MovementController:_setRagdoll(on: boolean, reason: string?)

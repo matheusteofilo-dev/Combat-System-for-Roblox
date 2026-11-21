@@ -453,8 +453,17 @@ function MovementAuthority:_updateClimb(c, now: number)
 		return
 	end
 	climb.nextCheck = now + self.config.climb.wallCheckInterval
-	local hit = self:_wallRay(c, -climb.normal, 2)
-	if hit and math.abs(hit.Normal.Y) <= 0.5 then
+	local function wall(direction: Vector3)
+		if direction.Magnitude < 1e-3 then
+			return nil
+		end
+		local result = self:_wallRay(c, direction, 2)
+		return if result and math.abs(result.Normal.Y) <= 0.5 then result else nil
+	end
+	local inward = -flat(climb.normal)
+	local side = inward:Cross(Vector3.yAxis)
+	local hit = wall(inward) or wall(flat(c.root.CFrame.LookVector)) or wall(side) or wall(-side)
+	if hit then
 		climb.normal = hit.Normal
 		climb.misses = 0
 	else
