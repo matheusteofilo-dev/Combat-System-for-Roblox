@@ -1,0 +1,6 @@
+<roblox xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External>
+	<External>nil</External>
+	<Item class="Folder" referent="RBXCOMBAT000001"><Properties><string name="Name">CombatRemotes</string></Properties>
+		<Item class="RemoteEvent" referent="RBXCOMBAT000002"><Properties><string name="Name">CombatAction</string></Properties></Item>
+		<Item class="RemoteEvent" referent="RBXCOMBAT000003"><Properties><string name="Name">CombatState</string></Properties></Item>
+	</Item></roblox>
